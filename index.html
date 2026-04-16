@@ -28,7 +28,17 @@
     const firebaseApp = initializeApp(firebaseConfig);
     const db = getFirestore(firebaseApp);
 
-    const RESULTADOS = ["Contactado","No contestó","Buzón","Venta","Seguimiento"];
+    const RESULTADOS = [
+  "Declinado por el reclutador",
+  "Se pasó con el cliente interno",
+  "No se presentó a la entrevista",
+  "No está interesado en el trabajo",
+  "No le fue atractivo el salario",
+  "No contestó llamada",
+  "Enviado a buzón",
+  "Número no existente",
+  "Pidió que se le llamara después"
+];
     const AG_COLORS = ["#534AB7","#0F6E56","#993C1D","#185FA5"];
     const INIT_AGENTES = [
       { id: "ag1", nombre: "Zaid Loredo",     tel: "", meta: 10, color: AG_COLORS[0] },
