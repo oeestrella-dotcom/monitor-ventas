@@ -29,25 +29,25 @@
     const db = getFirestore(firebaseApp);
 
     const RESULTADOS = [
-  "Declinado por el reclutador",
-  "Se pasó con el cliente interno",
-  "No se presentó a la entrevista",
-  "No está interesado en el trabajo",
-  "No le fue atractivo el salario",
-  "No contestó llamada",
-  "Enviado a buzón",
-  "Número no existente",
-  "Pidió que se le llamara después"
-];
+      "Declinado por el reclutador",
+      "Se pasó con el cliente interno",
+      "No se presentó a la entrevista",
+      "No está interesado en el trabajo",
+      "No le fue atractivo el salario",
+      "No contestó llamada",
+      "Enviado a buzón",
+      "Número no existente",
+      "Pidió que se le llamara después"
+    ];
     const AG_COLORS = ["#534AB7","#0F6E56","#993C1D","#185FA5"];
-    const INIT_RECLUTADOR = [
+    const INIT_AGENTES = [
       { id: "ag1", nombre: "Zaid Loredo",     tel: "", meta: 10, color: AG_COLORS[0] },
       { id: "ag2", nombre: "Marifer Lopez",   tel: "", meta: 10, color: AG_COLORS[1] },
       { id: "ag3", nombre: "Jazmín Cazares",  tel: "", meta: 10, color: AG_COLORS[2] },
       { id: "ag4", nombre: "Efraín Estrella", tel: "", meta: 10, color: AG_COLORS[3] },
     ];
 
-    let reclutador = [...INIT_RECLUTADOR];
+    let agentes = [...INIT_AGENTES];
     let llamadas = [];
     let vista = "admin";
     let tab = "dashboard";
@@ -58,7 +58,7 @@
     let modalAgente = false;
     let modalRecordatorio = false;
     let editId = null;
-    let formLlamada = { numero: "", duracion: "", resultado: "Contactado", nota: "" };
+    let formLlamada = { numero: "", duracion: "", resultado: RESULTADOS[0], nota: "" };
     let formAg = { nombre: "", tel: "", meta: 10 };
     let recordatorioMsg = "";
 
@@ -98,7 +98,7 @@
         agenteId: agenteActivo, numero: formLlamada.numero, duracion: formLlamada.duracion,
         resultado: formLlamada.resultado, nota: formLlamada.nota, fecha: hoy(), hora: new Date().toISOString()
       });
-      formLlamada = { numero: "", duracion: "", resultado: "Contactado", nota: "" };
+      formLlamada = { numero: "", duracion: "", resultado: RESULTADOS[0], nota: "" };
       modalLlamada = false; render();
     }
 
@@ -123,7 +123,7 @@
     }
 
     function exportCSV() {
-      const rows = [["Agente","Teléfono","Fecha","Hora","Número marcado","Duración (min)","Resultado","Nota"]];
+      const rows = [["Reclutador","Teléfono","Fecha","Hora","Número marcado","Duración (min)","Resultado","Nota"]];
       llamadas.forEach(l => {
         const ag = agentes.find(a => a.id === l.agenteId);
         rows.push([ag?.nombre||"", ag?.tel||"", l.fecha, formatHora(l.hora), l.numero, l.duracion, l.resultado, l.nota]);
@@ -138,10 +138,10 @@
     function generarRecordatorio() {
       const bajos = agentes.filter(ag => llamadasDia(ag.id).length < ag.meta * 0.6);
       if (bajos.length === 0) {
-        recordatorioMsg = "✅ ¡Todos los agentes van bien o ya cumplieron su meta hoy!";
+        recordatorioMsg = "✅ ¡Todos los reclutadores van bien o ya cumplieron su meta hoy!";
       } else {
         const lines = bajos.map(ag => `• ${ag.nombre}: lleva ${llamadasDia(ag.id).length} de ${ag.meta} llamadas`);
-        recordatorioMsg = `🔔 Recordatorio de meta diaria\n\nHoy (${hoy()}) los siguientes agentes aún no alcanzan su meta mínima:\n\n${lines.join("\n")}\n\n¡Ánimo, aún hay tiempo para lograrlo! 💪`;
+        recordatorioMsg = `🔔 Recordatorio de meta diaria\n\nHoy (${hoy()}) los siguientes reclutadores aún no alcanzan su meta mínima:\n\n${lines.join("\n")}\n\n¡Ánimo, aún hay tiempo para lograrlo! 💪`;
       }
       modalRecordatorio = true; render();
     }
@@ -159,14 +159,14 @@
       const totales = {
         total: agentes.reduce((s, a) => s + llamadasDia(a.id).length, 0),
         cumplieron: agentes.filter(a => llamadasDia(a.id).length >= a.meta).length,
-        ventas: llamadas.filter(l => l.fecha === fechaVista && l.resultado === "Venta").length,
+        ventas: llamadas.filter(l => l.fecha === fechaVista && l.resultado === "Se pasó con el cliente interno").length,
       };
       const agentesBajos = agentes.filter(ag => llamadasDia(ag.id).length < ag.meta * 0.6);
       root.innerHTML = `
-      <h2 style="font-size:18px;font-weight:500;margin:0 0 1rem">Monitor de agentes de ventas</h2>
+      <h2 style="font-size:18px;font-weight:500;margin:0 0 1rem">Monitor de reclutadores</h2>
       <div style="display:flex;gap:8px;margin-bottom:1.5rem;border-bottom:0.5px solid #ddd;padding-bottom:0.75rem">
         <button onclick="setVista('admin')" style="padding:6px 16px;border-radius:8px;border:0.5px solid ${vista==='admin'?'#888':'#ddd'};background:${vista==='admin'?'#f0f0f0':'transparent'};cursor:pointer;font-size:14px;font-weight:${vista==='admin'?500:400}">Administrador</button>
-        <button onclick="setVista('agente')" style="padding:6px 16px;border-radius:8px;border:0.5px solid ${vista==='agente'?'#888':'#ddd'};background:${vista==='agente'?'#f0f0f0':'transparent'};cursor:pointer;font-size:14px;font-weight:${vista==='agente'?500:400}">Agente</button>
+        <button onclick="setVista('agente')" style="padding:6px 16px;border-radius:8px;border:0.5px solid ${vista==='agente'?'#888':'#ddd'};background:${vista==='agente'?'#f0f0f0':'transparent'};cursor:pointer;font-size:14px;font-weight:${vista==='agente'?500:400}">Reclutador</button>
       </div>
       ${vista === "admin" ? renderAdmin(days7, totales, agentesBajos) : renderAgente()}
       ${modalLlamada ? renderModalLlamada() : ""}
@@ -185,7 +185,7 @@
         <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
           <button onclick="generarRecordatorio()" style="padding:5px 12px;border-radius:8px;border:0.5px solid ${agentesBajos.length?'#A32D2D55':'#ddd'};background:transparent;cursor:pointer;font-size:12px;color:${agentesBajos.length?'#A32D2D':'#666'}">🔔 Recordatorio${agentesBajos.length?' ('+agentesBajos.length+')':''}</button>
           <button onclick="exportCSV()" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:12px">⬇ Exportar CSV</button>
-          <button onclick="abrirNuevoAgente()" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:12px">+ Agente</button>
+          <button onclick="abrirNuevoAgente()" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:12px">+ Reclutador</button>
         </div>
       </div>
       ${tab === "dashboard" ? renderDashboard(totales) : renderGrafica(days7)}`;
@@ -198,7 +198,7 @@
         <input type="date" id="fecha-input" value="${fechaVista}" style="font-size:13px;padding:4px 8px;border-radius:8px;border:0.5px solid #ccc;background:#fff"/>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:1.25rem">
-        ${[["Llamadas totales",totales.total],["Metas cumplidas",`${totales.cumplieron}/${agentes.length}`],["Ventas del día",totales.ventas]].map(([l,v])=>`
+        ${[["Llamadas totales",totales.total],["Metas cumplidas",`${totales.cumplieron}/${agentes.length}`],["Pasados a cliente",totales.ventas]].map(([l,v])=>`
         <div style="background:#f5f5f5;border-radius:8px;padding:0.75rem 1rem">
           <p style="font-size:11px;color:#666;margin:0 0 4px">${l}</p>
           <p style="font-size:22px;font-weight:500;margin:0">${v}</p>
@@ -244,7 +244,7 @@
                         <td style="padding:5px 8px 5px 0;color:#666;white-space:nowrap">${formatHora(l.hora)}</td>
                         <td style="padding:5px 8px 5px 0">${l.numero}</td>
                         <td style="padding:5px 8px 5px 0;color:#666">${l.duracion||"—"}</td>
-                        <td style="padding:5px 8px 5px 0"><span style="padding:2px 6px;border-radius:99px;font-size:11px;background:${l.resultado==="Venta"?"#EAF3DE":"#f5f5f5"};color:${l.resultado==="Venta"?"#3B6D11":"#666"}">${l.resultado}</span></td>
+                        <td style="padding:5px 8px 5px 0"><span style="padding:2px 6px;border-radius:99px;font-size:11px;background:${l.resultado==="Se pasó con el cliente interno"?"#EAF3DE":"#f5f5f5"};color:${l.resultado==="Se pasó con el cliente interno"?"#3B6D11":"#666"}">${l.resultado}</span></td>
                         <td style="padding:5px 8px 5px 0;color:#666;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.nota||"—"}</td>
                         <td><button onclick="eliminarLlamada('${l.id}')" style="font-size:11px;padding:2px 6px;border-radius:6px;border:0.5px solid #ddd;background:transparent;cursor:pointer;color:#A32D2D">✕</button></td>
                       </tr>`).join("")}
@@ -293,7 +293,7 @@
       }).join("");
       return `
       <div style="background:#fff;border:0.5px solid #ddd;border-radius:12px;padding:1.25rem">
-        <p style="font-weight:500;font-size:14px;margin:0 0 4px">Llamadas por agente — últimos 7 días</p>
+        <p style="font-weight:500;font-size:14px;margin:0 0 4px">Llamadas por reclutador — últimos 7 días</p>
         <p style="font-size:12px;color:#666;margin:0 0 1rem">La línea punteada indica la meta mínima.</p>
         <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:1rem">
           ${agentes.map(ag=>`<div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;border-radius:2px;background:${ag.color}"></div><span style="font-size:12px;color:#666">${ag.nombre.split(" ")[0]}</span></div>`).join("")}
@@ -316,7 +316,7 @@
       const ag = agentes.find(a => a.id === agenteActivo);
       return `
       <div style="margin-bottom:1rem">
-        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Selecciona tu perfil:</label>
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Selecciona tu nombre:</label>
         <select id="agente-select" style="width:100%;font-size:14px;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;background:#fff">
           <option value="">— Selecciona —</option>
           ${agentes.map(a=>`<option value="${a.id}" ${agenteActivo===a.id?"selected":""}>${a.nombre}</option>`).join("")}
@@ -355,7 +355,7 @@
             <div style="display:flex;gap:10px;padding:8px 0;border-top:0.5px solid #eee;align-items:center">
               <span style="font-size:12px;color:#666;min-width:40px">${formatHora(l.hora)}</span>
               <span style="font-size:13px;flex:1">${l.numero}</span>
-              <span style="font-size:11px;padding:2px 7px;border-radius:99px;background:${l.resultado==="Venta"?"#EAF3DE":"#f5f5f5"};color:${l.resultado==="Venta"?"#3B6D11":"#666"}">${l.resultado}</span>
+              <span style="font-size:11px;padding:2px 7px;border-radius:99px;background:${l.resultado==="Se pasó con el cliente interno"?"#EAF3DE":"#f5f5f5"};color:${l.resultado==="Se pasó con el cliente interno"?"#3B6D11":"#666"}">${l.resultado}</span>
               <button onclick="eliminarLlamada('${l.id}')" style="font-size:11px;padding:2px 6px;border-radius:6px;border:0.5px solid #ddd;background:transparent;cursor:pointer;color:#A32D2D">✕</button>
             </div>`).join("")}
       </div>`;
@@ -388,7 +388,7 @@
       return `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:100">
         <div style="background:#fff;border-radius:12px;border:0.5px solid #ddd;padding:1.5rem;width:min(400px,92vw)">
-          <p style="font-weight:500;font-size:15px;margin:0 0 1rem">${editId?"Editar agente":"Nuevo agente"}</p>
+          <p style="font-weight:500;font-size:15px;margin:0 0 1rem">${editId?"Editar reclutador":"Nuevo reclutador"}</p>
           <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre completo *</label>
           <input id="ag-nombre" type="text" placeholder="Ej. Carlos López" value="${formAg.nombre}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:0.75rem"/>
           <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Teléfono / WhatsApp</label>
@@ -442,7 +442,7 @@
     window.submitLlamada = () => {
       formLlamada.numero = document.getElementById("f-numero")?.value||"";
       formLlamada.duracion = document.getElementById("f-duracion")?.value||"";
-      formLlamada.resultado = document.getElementById("f-resultado")?.value||"Contactado";
+      formLlamada.resultado = document.getElementById("f-resultado")?.value||RESULTADOS[0];
       formLlamada.nota = document.getElementById("f-nota")?.value||"";
       guardarLlamada();
     };
