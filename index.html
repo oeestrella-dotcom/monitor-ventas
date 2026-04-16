@@ -1,14 +1,449 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Monitor de Ventas</title>
-  <script type="module" src="app.js"></script>
-  <link rel="stylesheet" href="style.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    #root { max-width: 740px; margin: 0 auto; padding: 1rem; }
+  </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root"><p style="padding:2rem;color:#666">Cargando...</p></div>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAqlw-VwhGKvVFigW3cKkhWuDkbJuaphsQ",
+      authDomain: "monitor-ventas-b1fec.firebaseapp.com",
+      projectId: "monitor-ventas-b1fec",
+      storageBucket: "monitor-ventas-b1fec.firebasestorage.app",
+      messagingSenderId: "503466390490",
+      appId: "1:503466390490:web:f20fa32efd2f574d4fc6e3"
+    };
+
+    const firebaseApp = initializeApp(firebaseConfig);
+    const db = getFirestore(firebaseApp);
+
+    const RESULTADOS = ["Contactado","No contestó","Buzón","Venta","Seguimiento"];
+    const AG_COLORS = ["#534AB7","#0F6E56","#993C1D","#185FA5"];
+    const INIT_AGENTES = [
+      { id: "ag1", nombre: "Zaid Loredo",     tel: "", meta: 10, color: AG_COLORS[0] },
+      { id: "ag2", nombre: "Marifer Lopez",   tel: "", meta: 10, color: AG_COLORS[1] },
+      { id: "ag3", nombre: "Jazmín Cazares",  tel: "", meta: 10, color: AG_COLORS[2] },
+      { id: "ag4", nombre: "Efraín Estrella", tel: "", meta: 10, color: AG_COLORS[3] },
+    ];
+
+    let agentes = [...INIT_AGENTES];
+    let llamadas = [];
+    let vista = "admin";
+    let tab = "dashboard";
+    let agenteActivo = null;
+    let detalleAgente = null;
+    let fechaVista = hoy();
+    let modalLlamada = false;
+    let modalAgente = false;
+    let modalRecordatorio = false;
+    let editId = null;
+    let formLlamada = { numero: "", duracion: "", resultado: "Contactado", nota: "" };
+    let formAg = { nombre: "", tel: "", meta: 10 };
+    let recordatorioMsg = "";
+
+    function hoy() { return new Date().toISOString().slice(0, 10); }
+    function formatHora(iso) { return new Date(iso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }); }
+    function iniciales(n) { return n.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase(); }
+    function getLast7Days() {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - (6 - i));
+        return d.toISOString().slice(0, 10);
+      });
+    }
+    function shortDate(iso) { const [,m,d] = iso.split("-"); return `${d}/${m}`; }
+    function llamadasDia(agId, fecha = fechaVista) { return llamadas.filter(l => l.agenteId === agId && l.fecha === fecha); }
+    function status(ag, fecha = fechaVista) {
+      const n = llamadasDia(ag.id, fecha).length;
+      if (n >= ag.meta) return "success";
+      if (n >= ag.meta * 0.6) return "warning";
+      return "danger";
+    }
+    function statusLabel(s) { return s === "success" ? "Meta cumplida" : s === "warning" ? "En progreso" : "Por debajo"; }
+    function statusColor(s) { return s === "success" ? "#3B6D11" : s === "warning" ? "#BA7517" : "#A32D2D"; }
+    function statusBg(s) { return s === "success" ? "#EAF3DE" : s === "warning" ? "#FAEEDA" : "#FCEBEB"; }
+
+    onSnapshot(collection(db, "llamadas"), snap => {
+      llamadas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      render();
+    });
+    onSnapshot(collection(db, "agentes"), snap => {
+      if (!snap.empty) agentes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      render();
+    });
+
+    async function guardarLlamada() {
+      if (!formLlamada.numero.trim()) return;
+      await addDoc(collection(db, "llamadas"), {
+        agenteId: agenteActivo, numero: formLlamada.numero, duracion: formLlamada.duracion,
+        resultado: formLlamada.resultado, nota: formLlamada.nota, fecha: hoy(), hora: new Date().toISOString()
+      });
+      formLlamada = { numero: "", duracion: "", resultado: "Contactado", nota: "" };
+      modalLlamada = false; render();
+    }
+
+    async function eliminarLlamada(id) { await deleteDoc(doc(db, "llamadas", id)); }
+
+    async function guardarAgente() {
+      if (!formAg.nombre.trim()) return;
+      if (editId) {
+        await setDoc(doc(db, "agentes", editId), { ...formAg, meta: Number(formAg.meta), color: agentes.find(a => a.id === editId)?.color || AG_COLORS[0] });
+      } else {
+        const newId = "ag" + Date.now();
+        await setDoc(doc(db, "agentes", newId), { nombre: formAg.nombre, tel: formAg.tel, meta: Number(formAg.meta), color: AG_COLORS[agentes.length % AG_COLORS.length] });
+      }
+      formAg = { nombre: "", tel: "", meta: 10 }; editId = null; modalAgente = false; render();
+    }
+
+    async function eliminarAgente(id) {
+      await deleteDoc(doc(db, "agentes", id));
+      const snap = await getDocs(collection(db, "llamadas"));
+      snap.docs.filter(d => d.data().agenteId === id).forEach(d => deleteDoc(doc(db, "llamadas", d.id)));
+      if (detalleAgente === id) detalleAgente = null;
+    }
+
+    function exportCSV() {
+      const rows = [["Agente","Teléfono","Fecha","Hora","Número marcado","Duración (min)","Resultado","Nota"]];
+      llamadas.forEach(l => {
+        const ag = agentes.find(a => a.id === l.agenteId);
+        rows.push([ag?.nombre||"", ag?.tel||"", l.fecha, formatHora(l.hora), l.numero, l.duracion, l.resultado, l.nota]);
+      });
+      const csv = rows.map(r => r.map(c => `"${String(c||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+      const blob = new Blob(["\uFEFF"+csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `llamadas_${hoy()}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function generarRecordatorio() {
+      const bajos = agentes.filter(ag => llamadasDia(ag.id).length < ag.meta * 0.6);
+      if (bajos.length === 0) {
+        recordatorioMsg = "✅ ¡Todos los agentes van bien o ya cumplieron su meta hoy!";
+      } else {
+        const lines = bajos.map(ag => `• ${ag.nombre}: lleva ${llamadasDia(ag.id).length} de ${ag.meta} llamadas`);
+        recordatorioMsg = `🔔 Recordatorio de meta diaria\n\nHoy (${hoy()}) los siguientes agentes aún no alcanzan su meta mínima:\n\n${lines.join("\n")}\n\n¡Ánimo, aún hay tiempo para lograrlo! 💪`;
+      }
+      modalRecordatorio = true; render();
+    }
+
+    function copiarRecordatorio() {
+      navigator.clipboard.writeText(recordatorioMsg).catch(() => {});
+      const btn = document.getElementById("btn-copiar");
+      if (btn) { btn.textContent = "¡Copiado!"; setTimeout(() => { btn.textContent = "Copiar mensaje"; }, 2000); }
+    }
+
+    function render() {
+      const root = document.getElementById("root");
+      if (!root) return;
+      const days7 = getLast7Days();
+      const totales = {
+        total: agentes.reduce((s, a) => s + llamadasDia(a.id).length, 0),
+        cumplieron: agentes.filter(a => llamadasDia(a.id).length >= a.meta).length,
+        ventas: llamadas.filter(l => l.fecha === fechaVista && l.resultado === "Venta").length,
+      };
+      const agentesBajos = agentes.filter(ag => llamadasDia(ag.id).length < ag.meta * 0.6);
+      root.innerHTML = `
+      <h2 style="font-size:18px;font-weight:500;margin:0 0 1rem">Monitor de agentes de ventas</h2>
+      <div style="display:flex;gap:8px;margin-bottom:1.5rem;border-bottom:0.5px solid #ddd;padding-bottom:0.75rem">
+        <button onclick="setVista('admin')" style="padding:6px 16px;border-radius:8px;border:0.5px solid ${vista==='admin'?'#888':'#ddd'};background:${vista==='admin'?'#f0f0f0':'transparent'};cursor:pointer;font-size:14px;font-weight:${vista==='admin'?500:400}">Administrador</button>
+        <button onclick="setVista('agente')" style="padding:6px 16px;border-radius:8px;border:0.5px solid ${vista==='agente'?'#888':'#ddd'};background:${vista==='agente'?'#f0f0f0':'transparent'};cursor:pointer;font-size:14px;font-weight:${vista==='agente'?500:400}">Agente</button>
+      </div>
+      ${vista === "admin" ? renderAdmin(days7, totales, agentesBajos) : renderAgente()}
+      ${modalLlamada ? renderModalLlamada() : ""}
+      ${modalAgente ? renderModalAgente() : ""}
+      ${modalRecordatorio ? renderModalRecordatorio() : ""}`;
+      bindEvents();
+    }
+
+    function renderAdmin(days7, totales, agentesBajos) {
+      return `
+      <div style="display:flex;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap;align-items:center">
+        <div style="display:flex;gap:6px">
+          <button onclick="setTab('dashboard')" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:${tab==='dashboard'?'#f0f0f0':'transparent'};cursor:pointer;font-size:12px;font-weight:${tab==='dashboard'?500:400}">Dashboard</button>
+          <button onclick="setTab('grafica')" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:${tab==='grafica'?'#f0f0f0':'transparent'};cursor:pointer;font-size:12px;font-weight:${tab==='grafica'?500:400}">Gráfica semanal</button>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="generarRecordatorio()" style="padding:5px 12px;border-radius:8px;border:0.5px solid ${agentesBajos.length?'#A32D2D55':'#ddd'};background:transparent;cursor:pointer;font-size:12px;color:${agentesBajos.length?'#A32D2D':'#666'}">🔔 Recordatorio${agentesBajos.length?' ('+agentesBajos.length+')':''}</button>
+          <button onclick="exportCSV()" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:12px">⬇ Exportar CSV</button>
+          <button onclick="abrirNuevoAgente()" style="padding:5px 12px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:12px">+ Agente</button>
+        </div>
+      </div>
+      ${tab === "dashboard" ? renderDashboard(totales) : renderGrafica(days7)}`;
+    }
+
+    function renderDashboard(totales) {
+      return `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem">
+        <label style="font-size:12px;color:#666">Fecha:</label>
+        <input type="date" id="fecha-input" value="${fechaVista}" style="font-size:13px;padding:4px 8px;border-radius:8px;border:0.5px solid #ccc;background:#fff"/>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:1.25rem">
+        ${[["Llamadas totales",totales.total],["Metas cumplidas",`${totales.cumplieron}/${agentes.length}`],["Ventas del día",totales.ventas]].map(([l,v])=>`
+        <div style="background:#f5f5f5;border-radius:8px;padding:0.75rem 1rem">
+          <p style="font-size:11px;color:#666;margin:0 0 4px">${l}</p>
+          <p style="font-size:22px;font-weight:500;margin:0">${v}</p>
+        </div>`).join("")}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${agentes.map(ag => {
+          const n = llamadasDia(ag.id).length;
+          const pct = Math.min(100, Math.round((n/ag.meta)*100));
+          const st = status(ag);
+          const open = detalleAgente === ag.id;
+          return `
+          <div style="background:#fff;border:0.5px solid #ddd;border-radius:12px;padding:1rem 1.25rem">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <div style="width:36px;height:36px;border-radius:50%;background:${ag.color}22;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;color:${ag.color};flex-shrink:0">${iniciales(ag.nombre)}</div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <span style="font-weight:500;font-size:14px">${ag.nombre}</span>
+                  <span style="font-size:10px;padding:2px 7px;border-radius:99px;background:${statusBg(st)};color:${statusColor(st)}">${statusLabel(st)}</span>
+                </div>
+                ${ag.tel?`<span style="font-size:11px;color:#666">${ag.tel}</span>`:""}
+              </div>
+              <div style="display:flex;gap:5px">
+                <button onclick="toggleDetalle('${ag.id}')" style="font-size:11px;padding:3px 9px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer">${open?"Ocultar":"Detalle"}</button>
+                <button onclick="editarAgente('${ag.id}')" style="font-size:11px;padding:3px 9px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer">Editar</button>
+                <button onclick="eliminarAgente('${ag.id}')" style="font-size:11px;padding:3px 9px;border-radius:8px;border:0.5px solid #A32D2D44;background:transparent;cursor:pointer;color:#A32D2D">✕</button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="flex:1;height:8px;background:#f0f0f0;border-radius:99px">
+                <div style="width:${pct}%;height:100%;background:${statusColor(st)};border-radius:99px"></div>
+              </div>
+              <span style="font-size:13px;font-weight:500;min-width:50px;color:${statusColor(st)}">${n} / ${ag.meta}</span>
+            </div>
+            ${open ? `
+            <div style="margin-top:12px;border-top:0.5px solid #eee;padding-top:10px">
+              ${llamadasDia(ag.id).length===0
+                ? `<p style="font-size:13px;color:#666;margin:0">Sin llamadas registradas este día.</p>`
+                : `<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse;min-width:420px">
+                    <thead><tr>${["Hora","Número","Min","Resultado","Nota",""].map(h=>`<th style="text-align:left;padding-bottom:6px;font-weight:400;color:#666;padding-right:8px">${h}</th>`).join("")}</tr></thead>
+                    <tbody>${llamadasDia(ag.id).map(l=>`
+                      <tr style="border-top:0.5px solid #eee">
+                        <td style="padding:5px 8px 5px 0;color:#666;white-space:nowrap">${formatHora(l.hora)}</td>
+                        <td style="padding:5px 8px 5px 0">${l.numero}</td>
+                        <td style="padding:5px 8px 5px 0;color:#666">${l.duracion||"—"}</td>
+                        <td style="padding:5px 8px 5px 0"><span style="padding:2px 6px;border-radius:99px;font-size:11px;background:${l.resultado==="Venta"?"#EAF3DE":"#f5f5f5"};color:${l.resultado==="Venta"?"#3B6D11":"#666"}">${l.resultado}</span></td>
+                        <td style="padding:5px 8px 5px 0;color:#666;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.nota||"—"}</td>
+                        <td><button onclick="eliminarLlamada('${l.id}')" style="font-size:11px;padding:2px 6px;border-radius:6px;border:0.5px solid #ddd;background:transparent;cursor:pointer;color:#A32D2D">✕</button></td>
+                      </tr>`).join("")}
+                    </tbody></table></div>`}
+            </div>` : ""}
+          </div>`;
+        }).join("")}
+      </div>`;
+    }
+
+    function renderGrafica(days7) {
+      const maxVal = Math.max(...agentes.flatMap(ag => days7.map(f => llamadasDia(ag.id,f).length)), agentes[0]?.meta||10) + 2;
+      const W=600,H=200,PAD={t:10,r:10,b:30,l:28};
+      const chartW=W-PAD.l-PAD.r, chartH=H-PAD.t-PAD.b;
+      const barW=Math.floor(chartW/days7.length/(agentes.length+1));
+      const groupW=barW*agentes.length+4;
+      let bars="",xLabels="",yLines="";
+      for(let i=0;i<=5;i++){
+        const val=Math.round((maxVal/5)*i);
+        const y=PAD.t+chartH-(val/maxVal)*chartH;
+        yLines+=`<line x1="${PAD.l}" y1="${y}" x2="${W-PAD.r}" y2="${y}" stroke="#eee" stroke-width="1"/>`;
+        yLines+=`<text x="${PAD.l-4}" y="${y+4}" text-anchor="end" font-size="10" fill="#999">${val}</text>`;
+      }
+      days7.forEach((fecha,di)=>{
+        const groupX=PAD.l+(di/days7.length)*chartW+(chartW/days7.length-groupW)/2;
+        agentes.forEach((ag,ai)=>{
+          const n=llamadasDia(ag.id,fecha).length;
+          const bh=(n/maxVal)*chartH;
+          bars+=`<rect x="${groupX+ai*(barW+1)}" y="${PAD.t+chartH-bh}" width="${barW}" height="${bh}" fill="${ag.color}" rx="2"/>`;
+        });
+        const lx=PAD.l+(di/days7.length)*chartW+(chartW/days7.length)/2;
+        xLabels+=`<text x="${lx}" y="${H-8}" text-anchor="middle" font-size="10" fill="#999">${shortDate(fecha)}</text>`;
+      });
+      const metaY=PAD.t+chartH-((agentes[0]?.meta||10)/maxVal)*chartH;
+      const resumen=agentes.map(ag=>{
+        const total=days7.reduce((s,f)=>s+llamadasDia(ag.id,f).length,0);
+        const dias=days7.filter(f=>llamadasDia(ag.id,f).length>=ag.meta).length;
+        return `<div style="background:#f5f5f5;border-radius:8px;padding:0.75rem">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <div style="width:8px;height:8px;border-radius:50%;background:${ag.color}"></div>
+            <span style="font-size:12px;font-weight:500">${ag.nombre.split(" ")[0]}</span>
+          </div>
+          <p style="font-size:20px;font-weight:500;margin:0 0 2px">${total}</p>
+          <p style="font-size:11px;color:#666;margin:0">${dias}/7 días con meta</p>
+        </div>`;
+      }).join("");
+      return `
+      <div style="background:#fff;border:0.5px solid #ddd;border-radius:12px;padding:1.25rem">
+        <p style="font-weight:500;font-size:14px;margin:0 0 4px">Llamadas por agente — últimos 7 días</p>
+        <p style="font-size:12px;color:#666;margin:0 0 1rem">La línea punteada indica la meta mínima.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:1rem">
+          ${agentes.map(ag=>`<div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;border-radius:2px;background:${ag.color}"></div><span style="font-size:12px;color:#666">${ag.nombre.split(" ")[0]}</span></div>`).join("")}
+        </div>
+        <div style="overflow-x:auto">
+          <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+            ${yLines}
+            <line x1="${PAD.l}" y1="${metaY}" x2="${W-PAD.r}" y2="${metaY}" stroke="#888" stroke-dasharray="4,3" stroke-width="1"/>
+            ${bars}${xLabels}
+          </svg>
+        </div>
+        <div style="margin-top:1.25rem;border-top:0.5px solid #eee;padding-top:1rem">
+          <p style="font-weight:500;font-size:13px;margin:0 0 0.75rem">Resumen semanal</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">${resumen}</div>
+        </div>
+      </div>`;
+    }
+
+    function renderAgente() {
+      const ag = agentes.find(a => a.id === agenteActivo);
+      return `
+      <div style="margin-bottom:1rem">
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px">Selecciona tu perfil:</label>
+        <select id="agente-select" style="width:100%;font-size:14px;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;background:#fff">
+          <option value="">— Selecciona —</option>
+          ${agentes.map(a=>`<option value="${a.id}" ${agenteActivo===a.id?"selected":""}>${a.nombre}</option>`).join("")}
+        </select>
+      </div>
+      ${ag ? renderAgentePanel(ag) : ""}`;
+    }
+
+    function renderAgentePanel(ag) {
+      const n = llamadasDia(ag.id).length;
+      const pct = Math.min(100, Math.round((n/ag.meta)*100));
+      const st = status(ag);
+      return `
+      <div style="background:#fff;border:0.5px solid #ddd;border-radius:12px;padding:1.25rem;margin-bottom:1rem">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div style="width:44px;height:44px;border-radius:50%;background:${ag.color}22;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:500;color:${ag.color}">${iniciales(ag.nombre)}</div>
+          <div>
+            <p style="margin:0;font-weight:500">${ag.nombre}</p>
+            <p style="margin:0;font-size:12px;color:#666">Meta del día: ${ag.meta} llamadas</p>
+          </div>
+          <span style="margin-left:auto;font-size:11px;padding:3px 10px;border-radius:99px;background:${statusBg(st)};color:${statusColor(st)}">${statusLabel(st)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <div style="flex:1;height:10px;background:#f0f0f0;border-radius:99px">
+            <div style="width:${pct}%;height:100%;background:${statusColor(st)};border-radius:99px"></div>
+          </div>
+          <span style="font-size:14px;font-weight:500;color:${statusColor(st)}">${n}/${ag.meta}</span>
+        </div>
+        <button onclick="abrirModalLlamada()" style="width:100%;padding:10px;border-radius:8px;border:0.5px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:14px;font-weight:500">+ Registrar llamada</button>
+      </div>
+      <div style="background:#fff;border:0.5px solid #ddd;border-radius:12px;padding:1rem 1.25rem">
+        <p style="margin:0 0 10px;font-weight:500;font-size:14px">Llamadas de hoy</p>
+        ${llamadasDia(ag.id).length===0
+          ? `<p style="font-size:13px;color:#666;margin:0">Aún no has registrado llamadas.</p>`
+          : llamadasDia(ag.id).map(l=>`
+            <div style="display:flex;gap:10px;padding:8px 0;border-top:0.5px solid #eee;align-items:center">
+              <span style="font-size:12px;color:#666;min-width:40px">${formatHora(l.hora)}</span>
+              <span style="font-size:13px;flex:1">${l.numero}</span>
+              <span style="font-size:11px;padding:2px 7px;border-radius:99px;background:${l.resultado==="Venta"?"#EAF3DE":"#f5f5f5"};color:${l.resultado==="Venta"?"#3B6D11":"#666"}">${l.resultado}</span>
+              <button onclick="eliminarLlamada('${l.id}')" style="font-size:11px;padding:2px 6px;border-radius:6px;border:0.5px solid #ddd;background:transparent;cursor:pointer;color:#A32D2D">✕</button>
+            </div>`).join("")}
+      </div>`;
+    }
+
+    function renderModalLlamada() {
+      return `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:100">
+        <div style="background:#fff;border-radius:12px;border:0.5px solid #ddd;padding:1.5rem;width:min(420px,92vw)">
+          <p style="font-weight:500;font-size:15px;margin:0 0 1rem">Registrar llamada</p>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Número marcado *</label>
+          <input id="f-numero" type="tel" placeholder="55 1234 5678" value="${formLlamada.numero}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:0.75rem"/>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Duración (minutos)</label>
+          <input id="f-duracion" type="number" placeholder="Ej. 5" value="${formLlamada.duracion}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:0.75rem"/>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Resultado</label>
+          <select id="f-resultado" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:0.75rem">
+            ${RESULTADOS.map(r=>`<option ${formLlamada.resultado===r?"selected":""}>${r}</option>`).join("")}
+          </select>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nota (opcional)</label>
+          <input id="f-nota" type="text" placeholder="Comentario rápido..." value="${formLlamada.nota}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:1.25rem"/>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button onclick="cerrarModalLlamada()" style="padding:8px 16px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:14px;color:#666">Cancelar</button>
+            <button onclick="submitLlamada()" style="padding:8px 20px;border-radius:8px;border:0.5px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:14px;font-weight:500">Guardar</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function renderModalAgente() {
+      return `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:100">
+        <div style="background:#fff;border-radius:12px;border:0.5px solid #ddd;padding:1.5rem;width:min(400px,92vw)">
+          <p style="font-weight:500;font-size:15px;margin:0 0 1rem">${editId?"Editar agente":"Nuevo agente"}</p>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre completo *</label>
+          <input id="ag-nombre" type="text" placeholder="Ej. Carlos López" value="${formAg.nombre}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:0.75rem"/>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Teléfono / WhatsApp</label>
+          <input id="ag-tel" type="tel" placeholder="55 1234 5678" value="${formAg.tel}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:0.75rem"/>
+          <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Meta mínima de llamadas/día *</label>
+          <input id="ag-meta" type="number" placeholder="Ej. 10" value="${formAg.meta}" style="width:100%;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:14px;margin-bottom:1.25rem"/>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button onclick="cerrarModalAgente()" style="padding:8px 16px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:14px;color:#666">Cancelar</button>
+            <button onclick="submitAgente()" style="padding:8px 20px;border-radius:8px;border:0.5px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:14px;font-weight:500">Guardar</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function renderModalRecordatorio() {
+      return `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:100">
+        <div style="background:#fff;border-radius:12px;border:0.5px solid #ddd;padding:1.5rem;width:min(440px,92vw)">
+          <p style="font-weight:500;font-size:15px;margin:0 0 0.75rem">Recordatorio generado</p>
+          <p style="font-size:12px;color:#666;margin:0 0 0.75rem">Copia este mensaje y envíalo por WhatsApp:</p>
+          <textarea readonly style="width:100%;height:180px;padding:8px 10px;border-radius:8px;border:0.5px solid #ccc;font-size:13px;line-height:1.6;resize:none;background:#f9f9f9">${recordatorioMsg}</textarea>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1rem">
+            <button onclick="cerrarModalRecordatorio()" style="padding:8px 16px;border-radius:8px;border:0.5px solid #ddd;background:transparent;cursor:pointer;font-size:14px;color:#666">Cerrar</button>
+            <button id="btn-copiar" onclick="copiarRecordatorio()" style="padding:8px 20px;border-radius:8px;border:0.5px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:14px;font-weight:500">Copiar mensaje</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function bindEvents() {
+      const fi = document.getElementById("fecha-input");
+      if (fi) fi.addEventListener("change", e => { fechaVista = e.target.value; render(); });
+      const as = document.getElementById("agente-select");
+      if (as) as.addEventListener("change", e => { agenteActivo = e.target.value || null; render(); });
+    }
+
+    window.setVista = v => { vista = v; render(); };
+    window.setTab = t => { tab = t; render(); };
+    window.toggleDetalle = id => { detalleAgente = detalleAgente === id ? null : id; render(); };
+    window.abrirNuevoAgente = () => { formAg = { nombre:"", tel:"", meta:10 }; editId=null; modalAgente=true; render(); };
+    window.editarAgente = id => { const ag=agentes.find(a=>a.id===id); if(ag){formAg={nombre:ag.nombre,tel:ag.tel,meta:ag.meta};editId=id;modalAgente=true;render();} };
+    window.eliminarAgente = id => eliminarAgente(id);
+    window.abrirModalLlamada = () => { modalLlamada=true; render(); };
+    window.cerrarModalLlamada = () => { modalLlamada=false; render(); };
+    window.cerrarModalAgente = () => { modalAgente=false; editId=null; render(); };
+    window.cerrarModalRecordatorio = () => { modalRecordatorio=false; render(); };
+    window.eliminarLlamada = id => eliminarLlamada(id);
+    window.exportCSV = exportCSV;
+    window.generarRecordatorio = generarRecordatorio;
+    window.copiarRecordatorio = copiarRecordatorio;
+    window.submitLlamada = () => {
+      formLlamada.numero = document.getElementById("f-numero")?.value||"";
+      formLlamada.duracion = document.getElementById("f-duracion")?.value||"";
+      formLlamada.resultado = document.getElementById("f-resultado")?.value||"Contactado";
+      formLlamada.nota = document.getElementById("f-nota")?.value||"";
+      guardarLlamada();
+    };
+    window.submitAgente = () => {
+      formAg.nombre = document.getElementById("ag-nombre")?.value||"";
+      formAg.tel = document.getElementById("ag-tel")?.value||"";
+      formAg.meta = document.getElementById("ag-meta")?.value||10;
+      guardarAgente();
+    };
+
+    render();
+  </script>
 </body>
 </html>
