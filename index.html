@@ -72,7 +72,9 @@
 
   let agentes = [...INIT_AGENTES];
   let llamadas = [];
-  let vista = "admin";
+  const params = new URLSearchParams(window.location.search);
+  const soloReclutador = params.get("vista") === "reclutador";
+  let vista = soloReclutador ? "agente" : "admin";
   let tab = "dashboard";
   let agenteActivo = null;
   let detalleAgente = null;
