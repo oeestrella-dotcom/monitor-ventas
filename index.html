@@ -50,7 +50,9 @@
   const firebaseApp = initializeApp(firebaseConfig);
   const db = getFirestore(firebaseApp);
 
-  const BLUE = "#2A6FBF", GRAY = "#3A3F4E", LIGHT_BLUE = "#EBF3FF";
+  // Detectar modo desde URL
+  const soloReclutador = new URLSearchParams(window.location.search).get("vista") === "reclutador";
+
   const RESULTADOS = [
     "Declinado por el reclutador",
     "Se pasó con el cliente interno",
@@ -62,7 +64,7 @@
     "Número no existente",
     "Pidió que se le llamara después"
   ];
-  const AG_COLORS = ["#2A6FBF","#1a5fa0","#3A3F4E","#4A5878"];
+  const AG_COLORS = ["#2A9FD8","#1a7fa8","#4A5568","#2d6a8f"];
   const INIT_AGENTES = [
     { id: "ag1", nombre: "Zaid Loredo",     tel: "", meta: 10, color: AG_COLORS[0] },
     { id: "ag2", nombre: "Marifer Lopez",   tel: "", meta: 10, color: AG_COLORS[1] },
@@ -72,8 +74,6 @@
 
   let agentes = [...INIT_AGENTES];
   let llamadas = [];
-  const params = new URLSearchParams(window.location.search);
-  const soloReclutador = params.get("vista") === "reclutador";
   let vista = soloReclutador ? "agente" : "admin";
   let tab = "dashboard";
   let agenteActivo = null;
@@ -175,17 +175,21 @@
       pasados: llamadas.filter(l => l.fecha === fechaVista && l.resultado === "Se pasó con el cliente interno").length,
     };
     const agentesBajos = agentes.filter(ag => llamadasDia(ag.id).length < ag.meta * 0.6);
+
     root.innerHTML = `
     <div class="header">
       ${LOGO_SVG}
-      <span class="header-title">Monitor de Reclutadores</span>
+      <span class="header-title">${soloReclutador ? "Registro de llamadas" : "Monitor de Reclutadores"}</span>
     </div>
     <div class="content">
-      <div style="display:flex;gap:8px;margin-bottom:1.25rem;border-bottom:1px solid #E2E8F0;padding-bottom:0.75rem">
-        <button class="tab-btn ${vista==='admin'?'active':''}" onclick="setVista('admin')">Administrador</button>
-        <button class="tab-btn ${vista==='agente'?'active':''}" onclick="setVista('agente')">Reclutador</button>
-      </div>
-      ${vista === "admin" ? renderAdmin(days7, totales, agentesBajos) : renderAgente()}
+      ${soloReclutador
+        ? renderAgente()
+        : `<div style="display:flex;gap:8px;margin-bottom:1.5rem;border-bottom:1px solid #E2E8F0;padding-bottom:0.75rem">
+            <button class="tab-btn ${vista==='admin'?'active':''}" onclick="setVista('admin')">Administrador</button>
+            <button class="tab-btn ${vista==='agente'?'active':''}" onclick="setVista('agente')">Reclutador</button>
+           </div>
+           ${vista === "admin" ? renderAdmin(days7, totales, agentesBajos) : renderAgente()}`
+      }
     </div>
     ${modalLlamada ? renderModalLlamada() : ""}
     ${modalAgente ? renderModalAgente() : ""}
@@ -290,7 +294,7 @@
       const groupX=PAD.l+(di/days7.length)*chartW+(chartW/days7.length-groupW)/2;
       agentes.forEach((ag,ai)=>{
         const n=llamadasDia(ag.id,fecha).length;
-        const bh=Math.max((n/maxVal)*chartH, n>0?2:0);
+        const bh=Math.max((n/maxVal)*chartH,n>0?2:0);
         bars+=`<rect x="${groupX+ai*(barW+1)}" y="${PAD.t+chartH-bh}" width="${barW}" height="${bh}" fill="${ag.color}" rx="2"/>`;
       });
       const lx=PAD.l+(di/days7.length)*chartW+(chartW/days7.length)/2;
@@ -442,7 +446,7 @@
     if (as) as.addEventListener("change", e => { agenteActivo = e.target.value || null; render(); });
   }
 
-  window.setVista = v => { vista = v; render(); };
+  window.setVista = v => { if (!soloReclutador) { vista = v; render(); } };
   window.setTab = t => { tab = t; render(); };
   window.toggleDetalle = id => { detalleAgente = detalleAgente === id ? null : id; render(); };
   window.abrirNuevoAgente = () => { formAg={nombre:"",tel:"",meta:10}; editId=null; modalAgente=true; render(); };
